@@ -180,14 +180,24 @@ app.get('/api/dashboard-summary/:location', async (req, res) => {
             }
         });
 
+<<<<<<< HEAD
         // Collect the latest reading per sensor type and its trend. Per-sensor
         // status comes from the ML classifier (not hard-coded thresholds) using
         // the most recent multivariate reading.
         const latestAll = allData.length > 0 ? allData[allData.length - 1] : null;
+=======
+        const thresholds = {
+            soil_moisture: { min: 30, max: 80 },
+            temperature: { min: 15, max: 35 },
+            humidity: { min: 30, max: 70 },
+            light_lux: { min: 500, max: 10000 }
+        };
+>>>>>>> 1b7a30fa3f877d186e035fa8b3470eb030272de9
 
         sensors.forEach(sType => {
             const matches = allData.filter(d => d[sType] !== undefined);
             const latest = matches.length > 0 ? Number(matches[matches.length - 1][sType]) : null;
+<<<<<<< HEAD
             const trend = matches.slice(-10).map(m => Number(m[sType]));
             summary[sType] = { current: latest, trend };
         });
@@ -211,21 +221,62 @@ app.get('/api/dashboard-summary/:location', async (req, res) => {
                 anomaly = anoRes.data;
             } catch (e) {
                 console.error("ML service call failed:", e.message);
+=======
+
+            // Basic trend (last 10 points)
+            const trend = matches.slice(-10).map(m => Number(m[sType]));
+
+            let status = "No Data";
+            if (latest !== null) {
+                const limit = thresholds[sType] || { min: 30, max: 80 };
+                if (latest < limit.min) {
+                    status = "X LOW: Check";
+                } else if (latest > limit.max) {
+                    status = "! HIGH: Check";
+                } else {
+                    status = "✓ Optimal";
+                }
+            }
+
+            summary[sType] = {
+                current: latest,
+                trend: trend,
+                status: status
+            };
+        });
+
+        // Add ML Classification for moisture
+        let mlStatus = { status: "Analyzing", recommendation: "...", severity: "info" };
+        if (summary.soil_moisture.current !== null) {
+            try {
+                const pyRes = await axios.post('http://localhost:5001/classify', {
+                    moisture: summary.soil_moisture.current
+                }, { timeout: 2000 });
+                mlStatus = pyRes.data;
+            } catch (e) {
+                console.error("ML Classify fail:", e.message);
+>>>>>>> 1b7a30fa3f877d186e035fa8b3470eb030272de9
                 mlStatus = { status: "Analysis Offline", recommendation: "Please check ML service connectivity.", severity: "warning" };
             }
         }
 
+<<<<<<< HEAD
         // Attach the classifier's status to each sensor so the UI shows the
         // same model-derived verdict everywhere.
         sensors.forEach(sType => {
             summary[sType].status = summary[sType].current === null ? "No Data" : mlStatus.status;
         });
 
+=======
+>>>>>>> 1b7a30fa3f877d186e035fa8b3470eb030272de9
         res.json({
             location,
             sensors: summary,
             ml: mlStatus,
+<<<<<<< HEAD
             anomaly,
+=======
+>>>>>>> 1b7a30fa3f877d186e035fa8b3470eb030272de9
             timestamp: new Date().toISOString()
         });
     } catch (error) {
@@ -301,6 +352,7 @@ function generateMockData(sensorType, location) {
 }
 
 /**
+<<<<<<< HEAD
  * Step 2: Temporal Analysis - descriptive stats only.
  * Status / recommendation come from the ML classifier, not threshold rules.
  */
@@ -308,6 +360,12 @@ function temporalAnalysis(data) {
     if (!data || data.length === 0) {
         return { avg: 0, min: 0, max: 0, latest: 0, slope: 0 };
     }
+=======
+ * Step 2: Temporal Analysis with Farmer Insights
+ */
+function temporalAnalysis(data) {
+    if (!data || data.length === 0) return { avg: 0, min: 0, max: 0, latest: 0, insight: "No data available." };
+>>>>>>> 1b7a30fa3f877d186e035fa8b3470eb030272de9
 
     const values = data.map(d => d.value);
     const avg = values.reduce((a, b) => a + b, 0) / values.length;
@@ -315,6 +373,7 @@ function temporalAnalysis(data) {
     const max = Math.max(...values);
     const latest = values[values.length - 1];
 
+<<<<<<< HEAD
     // Least-squares slope (per step) as a pure descriptive measure of trend.
     const n = values.length;
     const xs = values.map((_, i) => i);
@@ -324,12 +383,38 @@ function temporalAnalysis(data) {
     const den = xs.reduce((acc, x) => acc + (x - meanX) ** 2, 0);
     const slope = den === 0 ? 0 : num / den;
 
+=======
+    let insight = "Soil moisture levels are stable.";
+
+    // Generate a farmer-friendly insight based on recent data trends
+    if (latest < 40) {
+        insight = `⚠️ Soil moisture is currently low (${latest.toFixed(1)}%). Consider irrigating soon.`;
+    } else if (latest > 70) {
+        insight = `✅ Soil moisture is ample (${latest.toFixed(1)}%). No need to irrigate right now.`;
+    } else {
+        // Look at trend over the last 3 readings if available
+        if (values.length >= 3) {
+            const recentValues = values.slice(-3);
+            if (recentValues[0] > recentValues[1] && recentValues[1] > recentValues[2]) {
+                insight = `📉 Soil moisture is steadily dropping. Best irrigation time: early morning or late evening.`;
+            } else if (recentValues[0] < recentValues[1] && recentValues[1] < recentValues[2]) {
+                insight = `📈 Soil moisture is rising. Irrigation is currently effective.`;
+            }
+        }
+    }
+
+    // Format all numbers to 1 decimal place before returning
+>>>>>>> 1b7a30fa3f877d186e035fa8b3470eb030272de9
     return {
         avg: Number(avg.toFixed(1)),
         min: Number(min.toFixed(1)),
         max: Number(max.toFixed(1)),
         latest: Number(latest.toFixed(1)),
+<<<<<<< HEAD
         slope: Number(slope.toFixed(3))
+=======
+        insight
+>>>>>>> 1b7a30fa3f877d186e035fa8b3470eb030272de9
     };
 }
 
@@ -363,6 +448,7 @@ app.get('/api/temporal/:sensorType/:location', async (req, res) => {
     try {
         const data = await getSensorData(sensorType, location, hours);
         const trend = temporalAnalysis(data);
+<<<<<<< HEAD
 
         // Ask the ML classifier to describe the latest reading. For
         // soil_moisture we forward the value; for other sensors we still
@@ -380,6 +466,8 @@ app.get('/api/temporal/:sensorType/:location', async (req, res) => {
             }
         }
 
+=======
+>>>>>>> 1b7a30fa3f877d186e035fa8b3470eb030272de9
         res.json({ trend, rawData: data });
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -520,6 +608,7 @@ app.get('/api/ml/:location', async (req, res) => {
     }
 });
 
+<<<<<<< HEAD
 // Anomaly detection for the latest multivariate reading at a location.
 app.get('/api/anomaly/:location', async (req, res) => {
     try {
@@ -561,6 +650,8 @@ app.get('/api/ml-metrics', async (_req, res) => {
     }
 });
 
+=======
+>>>>>>> 1b7a30fa3f877d186e035fa8b3470eb030272de9
 app.post('/api/chat', authMiddleware, async (req, res) => {
     const { message, location, currentTab } = req.body;
     if (!db) return res.status(503).json({ error: "Database not connected" });
