@@ -6,6 +6,7 @@ const TAB_LABELS = {
     temporal: 'Analysis',
     ml: 'Predictions',
     correlation: 'Insights',
+    anomalies: 'Anomalies',
     alerts: 'Alerts'
 };
 
@@ -146,6 +147,7 @@ const ChatBot = ({ location, activeTab, onNavigate }) => {
                         <button type="button" onClick={() => sendMessage('Explain the recent trend')}>Trend</button>
                         <button type="button" onClick={() => sendMessage('What factor influences moisture most?')}>Influence</button>
                         <button type="button" onClick={() => sendMessage('Should I irrigate now?')}>Decision</button>
+                        <button type="button" onClick={() => sendMessage('Are there any anomalies?')}>Anomalies</button>
                     </div>
 
                     <div className="chatbot-messages">

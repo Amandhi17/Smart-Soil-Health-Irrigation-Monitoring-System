@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import axios from 'axios';
+import AuthBrandMark from './AuthBrandMark';
 
 const Login = ({ onSwitchToRegister, onLoginSuccess }) => {
     const [email, setEmail] = useState('');
@@ -15,7 +16,6 @@ const Login = ({ onSwitchToRegister, onLoginSuccess }) => {
             const response = await axios.post('http://localhost:5000/api/auth/login', { email, password });
             const { token, user } = response.data;
 
-            // Store session
             localStorage.setItem('agri_token', token);
             localStorage.setItem('agri_user', JSON.stringify(user));
 
@@ -29,45 +29,60 @@ const Login = ({ onSwitchToRegister, onLoginSuccess }) => {
 
     return (
         <div className="auth-container">
-            <div className="auth-card glass-panel">
+            <div className="auth-backdrop" aria-hidden />
+            <div className="auth-card">
                 <div className="auth-header">
-                    <div className="auth-logo">🌿</div>
-                    <h2>Welcome Back, Farmer</h2>
-                    <p>Log in to monitor your farm's health</p>
+                    <AuthBrandMark />
+                    <p className="auth-eyebrow">AgriSmart · secure access</p>
+                    <h2>Welcome back</h2>
+                    <p className="auth-subtitle">Sign in to your farm operations dashboard</p>
                 </div>
 
-                <form className="auth-form" onSubmit={handleLogin}>
+                <form className="auth-form" onSubmit={handleLogin} noValidate>
                     <div className="input-group">
-                        <label>Email Address</label>
+                        <label htmlFor="login-email">Email address</label>
                         <input
+                            id="login-email"
                             type="email"
-                            placeholder="farmer@agrismart.com"
+                            placeholder="you@example.com"
                             value={email}
                             onChange={(e) => setEmail(e.target.value)}
+                            autoComplete="email"
                             required
                         />
                     </div>
 
                     <div className="input-group">
-                        <label>Password</label>
+                        <label htmlFor="login-password">Password</label>
                         <input
+                            id="login-password"
                             type="password"
-                            placeholder="••••••••"
+                            placeholder="Enter your password"
                             value={password}
                             onChange={(e) => setPassword(e.target.value)}
+                            autoComplete="current-password"
                             required
                         />
                     </div>
 
-                    {error && <div className="auth-error">{error}</div>}
+                    {error && (
+                        <div className="auth-error" role="alert">
+                            {error}
+                        </div>
+                    )}
 
                     <button type="submit" className="auth-button" disabled={loading}>
-                        {loading ? 'Entering Farm...' : 'Login to Dashboard'}
+                        {loading ? 'Signing in…' : 'Continue to dashboard'}
                     </button>
                 </form>
 
                 <div className="auth-footer">
-                    <p>New to AgriSmart? <span onClick={onSwitchToRegister}>Register Here</span></p>
+                    <p>
+                        New to AgriSmart?{' '}
+                        <button type="button" className="auth-text-link" onClick={onSwitchToRegister}>
+                            Create an account
+                        </button>
+                    </p>
                 </div>
             </div>
         </div>

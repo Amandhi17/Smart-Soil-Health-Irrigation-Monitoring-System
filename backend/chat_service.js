@@ -1,4 +1,6 @@
 const axios = require('axios');
+const { getMergedSensorRowsForLocation } = require('./sensorFirebase');
+const { buildAnomalyChatSummary } = require('./anomaly_service');
 
 const SENSOR_LABELS = {
     soil_moisture: 'Soil Moisture',
@@ -12,6 +14,8 @@ const TAB_GUIDE = {
     temporal: 'Analysis: historical trends, averages, min/max values, and recent movement.',
     ml: 'Predictions: AI-based moisture forecast and irrigation recommendation.',
     correlation: 'Insights: relationships between sunlight, temperature, humidity, and moisture.',
+    anomaly: 'Anomaly: multivariate outlier detection vs your recent baseline.',
+    anomalies: 'Anomalies: statistical outlier view (rolling z-score + MAD) with charts.',
     alerts: 'Alerts: anomalies, cleaning issues, and warning conditions.'
 };
 
@@ -100,18 +104,9 @@ function getDashboardGuideMessage(currentTab, requestedTab) {
     return `You are currently in **${target}**. ${guide}`;
 }
 
-async function fetchRecentRecords(db, location, limit = 120) {
-    const snapshot = await db.ref('cleaned_sensors').limitToLast(limit).once('value');
-    const records = [];
-
-    snapshot.forEach((snap) => {
-        const value = snap.val();
-        if (value && (value.device_id === location || !value.device_id)) {
-            records.push(value);
-        }
-    });
-
-    return records.sort((a, b) => new Date(a.timestamp || 0) - new Date(b.timestamp || 0));
+async function fetchRecentRecords(db, location, limit = 200) {
+    const { rows } = await getMergedSensorRowsForLocation(db, location, limit);
+    return rows;
 }
 
 async function fetchRecentAlerts(db) {
@@ -172,6 +167,8 @@ async function buildChatContext(db, location, currentTab) {
         { factor: 'Temperature', metric: Math.abs(correlations.temperatureVsMoisture), value: correlations.temperatureVsMoisture }
     ].sort((a, b) => b.metric - a.metric);
 
+    const statisticalAnomalies = buildAnomalyChatSummary(records);
+
     return {
         location,
         currentTab,
@@ -181,6 +178,7 @@ async function buildChatContext(db, location, currentTab) {
         correlations,
         strongestMoistureDriver: influenceCandidates[0],
         prediction,
+        statisticalAnomalies,
         alerts: alerts.map((alert) => ({
             type: alert.type || 'Alert',
             message: alert.message || 'Alert detected.',
@@ -194,9 +192,25 @@ async function buildChatContext(db, location, currentTab) {
 function getIntent(message) {
     const msg = message.toLowerCase();
 
+    if (
+        /\b(anomalies|anomaly detection|statistical outlier|statistical anomaly)\b/i.test(msg) ||
+        /\b(outliers?|unusual pattern)\b/i.test(msg) ||
+        /\bunusual (but valid|reading)/i.test(msg) ||
+        /\bwhy (was|is) this (reading )?flagged/i.test(msg) ||
+        /\bwhy .*\b(flagged|outlier|anomal)/i.test(msg) ||
+        /\b(reason|explain) .*\b(flagged|outlier|anomal)/i.test(msg) ||
+        /\b(z-score|rolling mad|\bmad\b)\b/i.test(msg) ||
+        /\bany anomalies?\b/i.test(msg) ||
+        /show (me )?(the )?(recent )?(outliers?|anomalies?)/i.test(msg)
+    ) {
+        return 'statAnomaly';
+    }
     if (/where|navigate|open|find|which tab|dashboard|show me/i.test(msg)) return 'guide';
-    if (/alert|anomaly|issue|problem|wrong|abnormal/i.test(msg)) return 'alerts';
-    if (/influence|factor|affect|relationship|correlation|compare|comparison|why/i.test(msg)) return 'correlation';
+    if (/alert|issue|problem|wrong|abnormal/i.test(msg)) return 'alerts';
+    if (/influence|factor|affect|relationship|correlation|compare|comparison/i.test(msg)) return 'correlation';
+    if (/\bwhy\b.*\b(moisture|humidity|temperature|light|sun|dry|wet|influence|factor|correlate)/i.test(msg)) {
+        return 'correlation';
+    }
     if (/should i|recommend|advice|decision|irrigate|pump|action|do now/i.test(msg)) return 'decision';
     if (/trend|history|change|past|over time|pattern/i.test(msg)) return 'trend';
     if (/current|now|latest|status|reading|today/i.test(msg)) return 'status';
@@ -223,14 +237,58 @@ function buildFallbackResponse(message, context) {
     }
 
     if (intent === 'status') {
+        const fmt = (v, suffix) => (v == null || Number.isNaN(Number(v)) ? '—' : `${v}${suffix}`);
         return {
-            reply: `Current farm status for **${context.location}**: Soil moisture is **${soil.current}%**, temperature is **${temperature.current}°C**, humidity is **${humidity.current}%**, and light intensity is **${light.current} lux**. The most recent data point was captured at **${context.latestTimestamp || 'the latest available time'}**.`,
+            reply: `Current farm status for **${context.location}**: Soil moisture **${fmt(soil.current, '%')}**, temperature **${fmt(temperature.current, '°C')}**, humidity **${fmt(humidity.current, '%')}**, light **${fmt(light.current, ' lux')}**. Latest timestamp: **${context.latestTimestamp || '—'}**.`,
             suggestedTab: 'dashboard',
             followUps: [
                 'Explain the moisture trend',
-                'Are there any alerts right now?',
+                'Are there any anomalies?',
                 'Should I irrigate now?'
             ]
+        };
+    }
+
+    if (intent === 'statAnomaly') {
+        const s = context.statisticalAnomalies;
+        const counts = s.perSensorAnomalyCounts || {};
+        const parts = Object.entries(counts)
+            .filter(([, n]) => n > 0)
+            .map(([k, n]) => `${SENSOR_LABELS[k] || k}: ${n}`)
+            .join(', ');
+        if (!s.totalReadings) {
+            return {
+                reply: 'There is not enough history in Firebase yet to run rolling z-score / MAD outlier detection.',
+                suggestedTab: 'anomalies',
+                followUps: ['Show current status', 'Open the Anomalies tab', 'Explain the trend']
+            };
+        }
+        const asksLatestWhy =
+            /\bwhy (was|is|did)\b/i.test(message) ||
+            /\bwhy .*\b(flagged|outlier|anomal)/i.test(message) ||
+            (/\bexplain\b/i.test(message) &&
+                /\b(this (reading)?|latest|last (point|reading)|that point|flagged)\b/i.test(message));
+
+        if (asksLatestWhy && s.totalReadings) {
+            return {
+                reply: s.latestIsAnomaly
+                    ? `The latest reading was flagged because: **${s.latestReason}** (severity score **${s.latestScore ?? '—'}**). This compares the value to your **recent** history (rolling mean/std and robust median/MAD)—not to fixed min/max validation.`
+                    : `The latest reading is **not** flagged as a statistical outlier. ${s.latestReason || 'It lies within the rolling envelope vs prior points.'}`,
+                suggestedTab: 'anomalies',
+                followUps: ['Are there any anomalies?', 'Open Alerts', 'What is the current status?']
+            };
+        }
+        if (s.anomalyCount === 0) {
+            return {
+                reply: `Statistical check (rolling window vs recent mean & robust median): **no outliers** in the loaded series for **${context.location}** (${s.totalReadings} points). Latest point is **${s.latestIsAnomaly ? 'flagged' : 'normal'}**.`,
+                suggestedTab: 'anomalies',
+                followUps: ['What is the current status?', 'Why was this reading flagged?', 'Open Alerts']
+            };
+        }
+        return {
+            reply: `**${s.anomalyCount}** statistical outlier rows detected (${s.anomalyRatePercent}% of ${s.totalReadings} readings). Per-sensor contributions: ${parts || 'see Anomalies tab'}. Latest row: **${s.latestIsAnomaly ? 'flagged' : 'not flagged'}**${s.latestIsAnomaly ? ` — ${s.latestReason}` : ''}. Open **Anomalies** for the chart and full reasons.`,
+            suggestedTab: 'anomalies',
+            followUps: ['Why was this reading flagged?', 'Open Alerts', 'Explain the moisture trend']
         };
     }
 
@@ -316,6 +374,7 @@ function buildFallbackResponse(message, context) {
         const lower = message.toLowerCase();
         if (lower.includes('prediction') || lower.includes('recommend')) suggestedTab = 'ml';
         if (lower.includes('alert')) suggestedTab = 'alerts';
+        if (lower.includes('anomalies') || lower.includes('outlier')) suggestedTab = 'anomalies';
         if (lower.includes('trend') || lower.includes('history') || lower.includes('analysis')) suggestedTab = 'temporal';
         if (lower.includes('insight') || lower.includes('correlation') || lower.includes('factor')) suggestedTab = 'correlation';
 
@@ -330,8 +389,12 @@ function buildFallbackResponse(message, context) {
         };
     }
 
+    const soilLine =
+        soil.current == null || Number.isNaN(Number(soil.current))
+            ? 'Soil moisture data is not available in the loaded window.'
+            : `Soil moisture is **${soil.current}%**`;
     return {
-        reply: `I can help in four useful ways: **(1)** answer questions about your sensor dataset, **(2)** guide you to the correct dashboard tab, **(3)** explain trends, comparisons, and anomalies in the charts, and **(4)** support decisions like irrigation timing. Right now, soil moisture is **${soil.current}%** and the prediction module recommends **${context.prediction.recommendation}**.`,
+        reply: `I can help with your dataset, dashboard navigation, trends, correlations, and irrigation timing. ${soilLine}. Prediction note: **${context.prediction.recommendation}**.`,
         suggestedTab: 'dashboard',
         followUps: [
             'What is the current status?',
@@ -375,7 +438,7 @@ function buildSystemPrompt() {
         'Always mention concrete numbers from the context when possible.',
         'Keep the answer concise, clear, and practical for a student demo project.',
         'Return valid JSON with keys: reply, suggestedTab, followUps.',
-        'suggestedTab must be one of: dashboard, temporal, ml, correlation, alerts.',
+        'suggestedTab must be one of: dashboard, temporal, ml, correlation, anomaly, anomalies, alerts.',
         'followUps must be an array of 2 or 3 short suggestions.'
     ].join(' ');
 }
@@ -397,7 +460,7 @@ function buildGeminiSchema() {
             },
             suggestedTab: {
                 type: 'string',
-                enum: ['dashboard', 'temporal', 'ml', 'correlation', 'alerts'],
+                enum: ['dashboard', 'temporal', 'ml', 'correlation', 'anomaly', 'anomalies', 'alerts'],
                 description: 'Best dashboard tab for the user to open next.'
             },
             followUps: {
@@ -545,8 +608,63 @@ async function callLLM(message, context) {
     return null;
 }
 
+function emptyChatContext(location, currentTab) {
+    const blank = (label) => ({
+        label,
+        current: null,
+        avg: null,
+        min: null,
+        max: null,
+        delta: null,
+        direction: 'unknown',
+    });
+    return {
+        location,
+        currentTab: currentTab || 'dashboard',
+        recordCount: 0,
+        latestTimestamp: null,
+        sensors: {
+            soil: blank('Soil Moisture'),
+            temperature: blank('Temperature'),
+            humidity: blank('Humidity'),
+            light: blank('Light Intensity'),
+        },
+        correlations: { sunlightVsMoisture: 0, temperatureVsMoisture: 0, temperatureVsHumidity: 0 },
+        strongestMoistureDriver: { factor: 'Sunlight', metric: 0, value: 0 },
+        prediction: {
+            currentMoisture: 0,
+            predictedMoisture: 0,
+            soilStatus: 'Unknown',
+            recommendation: 'Could not load sensor context.',
+        },
+        statisticalAnomalies: {
+            totalReadings: 0,
+            anomalyCount: 0,
+            anomalyRatePercent: 0,
+            perSensorAnomalyCounts: {
+                soil_moisture: 0,
+                temperature: 0,
+                humidity: 0,
+                light_lux: 0,
+            },
+            latestIsAnomaly: false,
+            latestScore: null,
+            latestReason: null,
+        },
+        alerts: [],
+        dashboardGuide: TAB_GUIDE,
+        currentTabGuide: getDashboardGuideMessage(currentTab || 'dashboard'),
+    };
+}
+
 async function generateChatResponse({ db, location, message, currentTab }) {
-    const context = await buildChatContext(db, location, currentTab);
+    let context;
+    try {
+        context = await buildChatContext(db, location, currentTab);
+    } catch (error) {
+        console.error('buildChatContext failed:', error.message);
+        context = emptyChatContext(location, currentTab);
+    }
 
     try {
         const llmResponse = await callLLM(message, context);

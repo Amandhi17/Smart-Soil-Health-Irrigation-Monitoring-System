@@ -86,6 +86,11 @@ const authMiddleware = (req, res, next) => {
 };
 
 const db = !isMockMode ? admin.database() : null;
+const { getMergedSensorRowsForLocation } = require('./sensorFirebase');
+const {
+    buildAnomaliesApiResponse,
+    buildStatisticalAnomalyAlerts,
+} = require('./anomaly_service');
 
 // --- AUTH ENDPOINTS ---
 
@@ -167,57 +172,57 @@ app.get('/api/dashboard-summary/:location', async (req, res) => {
         const sensors = ['soil_moisture', 'temperature', 'humidity', 'light_lux'];
         const summary = {};
 
-        // Fetch last 100 recent readings globally from cleaned data
-        const snapshot = await db.ref('cleaned_sensors')
-            .limitToLast(100)
-            .once('value');
+        const { rows: allData, source: dataSource, inferredDevice } = await getMergedSensorRowsForLocation(
+            db,
+            location,
+            120
+        );
 
-        const allData = [];
-        snapshot.forEach(snap => {
-            const val = snap.val();
-            if (val.device_id === location || !val.device_id) {
-                allData.push(val);
-            }
-        });
-
-        // Collect the latest reading per sensor type and its trend. Per-sensor
-        // status comes from the ML classifier (not hard-coded thresholds) using
-        // the most recent multivariate reading.
         const latestAll = allData.length > 0 ? allData[allData.length - 1] : null;
 
-        sensors.forEach(sType => {
-            const matches = allData.filter(d => d[sType] !== undefined);
+        sensors.forEach((sType) => {
+            const matches = allData.filter(
+                (d) => d[sType] !== undefined && Number.isFinite(Number(d[sType]))
+            );
             const latest = matches.length > 0 ? Number(matches[matches.length - 1][sType]) : null;
-            const trend = matches.slice(-10).map(m => Number(m[sType]));
+            const trend = matches.slice(-10).map((m) => Number(m[sType]));
             summary[sType] = { current: latest, trend };
         });
 
-        // Ask the ML service to classify the latest multivariate reading.
         let mlStatus = { status: "Analyzing", recommendation: "...", severity: "info" };
         let anomaly = { is_anomaly: false, anomaly_score: 0, cluster: null };
         if (latestAll && summary.soil_moisture.current !== null) {
             const payload = {
-                moisture:    Number(summary.soil_moisture.current),
+                moisture: Number(summary.soil_moisture.current),
                 temperature: Number(summary.temperature.current ?? 25),
-                humidity:    Number(summary.humidity.current ?? 55),
-                light_lux:   Number(summary.light_lux.current ?? 20000)
+                humidity: Number(summary.humidity.current ?? 55),
+                light_lux: Number(summary.light_lux.current ?? 20000),
             };
             try {
                 const [clsRes, anoRes] = await Promise.all([
                     axios.post('http://localhost:5001/classify', payload, { timeout: 2000 }),
-                    axios.post('http://localhost:5001/anomaly',  payload, { timeout: 2000 })
+                    axios.post('http://localhost:5001/anomaly', payload, { timeout: 2000 }),
                 ]);
                 mlStatus = clsRes.data;
                 anomaly = anoRes.data;
             } catch (e) {
                 console.error("ML service call failed:", e.message);
-                mlStatus = { status: "Analysis Offline", recommendation: "Please check ML service connectivity.", severity: "warning" };
+                mlStatus = {
+                    status: "Analysis Offline",
+                    recommendation: "Please check ML service connectivity.",
+                    severity: "warning",
+                };
             }
+        } else {
+            mlStatus = {
+                status: "No Data",
+                recommendation:
+                    "No Firebase rows matched this device id. If your ESP uses a different device_id, either align it with the dashboard or rely on any-device fallback (see inferredDevice).",
+                severity: "warning",
+            };
         }
 
-        // Attach the classifier's status to each sensor so the UI shows the
-        // same model-derived verdict everywhere.
-        sensors.forEach(sType => {
+        sensors.forEach((sType) => {
             summary[sType].status = summary[sType].current === null ? "No Data" : mlStatus.status;
         });
 
@@ -226,7 +231,9 @@ app.get('/api/dashboard-summary/:location', async (req, res) => {
             sensors: summary,
             ml: mlStatus,
             anomaly,
-            timestamp: new Date().toISOString()
+            dataSource,
+            inferredDevice,
+            timestamp: new Date().toISOString(),
         });
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -246,34 +253,33 @@ async function getSensorData(sensorType, location, durationHours = 24) {
         return generateMockData(sensorType, location);
     }
     try {
-        const ref = db.ref('cleaned_sensors');
-        const startTime = new Date(Date.now() - durationHours * 60 * 60 * 1000).toISOString();
-
         const timeoutPromise = new Promise((_, reject) =>
-            setTimeout(() => reject(new Error("Firebase request timed out")), 5000)
+            setTimeout(() => reject(new Error("Firebase request timed out")), 8000)
         );
 
-        const snapshotPromise = ref.limitToLast(100).once('value');
+        const mergedPromise = getMergedSensorRowsForLocation(db, location, 200);
+        const { rows: merged } = await Promise.race([mergedPromise, timeoutPromise]);
 
-        const snapshot = await Promise.race([snapshotPromise, timeoutPromise]);
-
+        const startMs = Date.now() - durationHours * 60 * 60 * 1000;
         const data = [];
-        snapshot.forEach(snap => {
-            const d = snap.val();
-            // Match against real property names. Lenient device_id check.
-            if ((d.device_id === location || !d.device_id) && d[sensorType] !== undefined) {
-                data.push({
-                    sensorType: sensorType,
-                    location: d.device_id || location,
-                    value: Number(d[sensorType]),
-                    timestamp: d.timestamp
-                });
-            }
-        });
+        for (const d of merged) {
+            const ts = d.timestamp ? new Date(d.timestamp).getTime() : 0;
+            if (Number.isFinite(ts) && ts < startMs) continue;
+            const v = d[sensorType];
+            if (v === undefined || v === null) continue;
+            const num = Number(v);
+            if (!Number.isFinite(num)) continue;
+            data.push({
+                sensorType,
+                location: d.device_id || location,
+                value: num,
+                timestamp: d.timestamp,
+            });
+        }
 
         if (data.length === 0) {
-            console.warn(`No real data found for ${sensorType} at ${location}.`);
-            return []; // No mock data
+            console.warn(`No real data found for ${sensorType} at ${location} (merged cleaned_sensors + sensors).`);
+            return [];
         }
 
         return data.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
@@ -388,61 +394,71 @@ app.get('/api/temporal/:sensorType/:location', async (req, res) => {
 
 app.get('/api/alerts', async (req, res) => {
     try {
-        // ... (Existing Alerts logic remains same, replacing outer scope up to listen)
         if (!db) return res.json([]);
 
-        // Fetch standard sensor alerts (from latest cleaned data)
-        const sensorSnapshot = await db.ref('cleaned_sensors').orderByChild('timestamp').limitToLast(1).once('value');
+        const location = String(req.query.location || 'ESP32_Plant_01').trim();
         const activeAlerts = [];
 
-        // Fetch Data Cleaning Alerts
         const cleaningSnapshot = await db.ref('cleaning_alerts').limitToLast(10).once('value');
         const cleaningAlerts = cleaningSnapshot.val() ? Object.values(cleaningSnapshot.val()) : [];
 
-        // Add cleaning alerts to the list
-        cleaningAlerts.forEach(alert => {
+        cleaningAlerts.forEach((alert) => {
             activeAlerts.push({
                 ...alert,
-                id: alert.id || Math.random().toString(36).substr(2, 9)
+                id: alert.id || Math.random().toString(36).substr(2, 9),
             });
         });
 
-        for (const snap of Object.values(sensorSnapshot.val() || {})) {
-            const d = snap;
-            if (d.soil_moisture !== undefined && typeof d.soil_moisture === 'number') {
-                const moisture = d.soil_moisture;
+        const { rows: mergedRows } = await getMergedSensorRowsForLocation(db, location, 100);
+        const latest = mergedRows.length > 0 ? mergedRows[mergedRows.length - 1] : null;
+        const moistureNum = latest != null ? Number(latest.soil_moisture) : NaN;
 
-                let smartStatus = "Analyzing...";
-                let smartRecommend = "Processing...";
-                let smartSeverity = "info";
+        if (latest && Number.isFinite(moistureNum)) {
+            const moisture = moistureNum;
+            let smartStatus = "Analyzing...";
+            let smartRecommend = "Processing...";
+            let smartSeverity = "info";
 
-                try {
-                    // Call Python ML service for Smart Classification
-                    const pyRes = await axios.post('http://localhost:5001/classify', { moisture }, { timeout: 2000 });
-                    smartStatus = pyRes.data.status;
-                    smartRecommend = pyRes.data.recommendation;
-                    smartSeverity = pyRes.data.severity;
-                } catch (pyErr) {
-                    console.error("Python classification failed:", pyErr.message);
-                    // Do not crash the server on ML failure
-                    smartStatus = "Classification Unavailable";
-                    smartRecommend = "Service is temporarily offline.";
-                    smartSeverity = "warning";
-                }
-
-                activeAlerts.push({
-                    id: Math.random().toString(36).substr(2, 9),
-                    sensorId: 'Soil Moisture',
-                    value: moisture,
-                    unit: '%',
-                    location: d.device_id || 'Unknown Location',
-                    timestamp: d.timestamp || new Date().toISOString(),
-                    type: smartStatus,
-                    message: smartRecommend,
-                    severity: smartSeverity
-                });
+            try {
+                const pyRes = await axios.post('http://localhost:5001/classify', { moisture }, { timeout: 2000 });
+                smartStatus = pyRes.data.status;
+                smartRecommend = pyRes.data.recommendation;
+                smartSeverity = pyRes.data.severity;
+            } catch (pyErr) {
+                console.error("Python classification failed:", pyErr.message);
+                smartStatus = "Classification Unavailable";
+                smartRecommend = "Service is temporarily offline.";
+                smartSeverity = "warning";
             }
+
+            activeAlerts.push({
+                id: Math.random().toString(36).substr(2, 9),
+                sensorId: 'Soil Moisture',
+                value: moisture,
+                unit: '%',
+                location: latest.device_id || location,
+                timestamp: latest.timestamp || new Date().toISOString(),
+                type: smartStatus,
+                message: smartRecommend,
+                severity: smartSeverity,
+            });
+        } else if (mergedRows.length === 0) {
+            activeAlerts.push({
+                id: 'no-sensor-rows',
+                type: 'Connectivity',
+                severity: 'warning',
+                message: `No Firebase readings for "${location}". Check /sensors or /cleaned_sensors and device_id.`,
+                timestamp: new Date().toISOString(),
+                sensorId: 'Data pipeline',
+                location,
+                value: '',
+                unit: '',
+            });
         }
+
+        const { rows: statRows } = await getMergedSensorRowsForLocation(db, location, 200);
+        const statAlerts = buildStatisticalAnomalyAlerts(statRows, location, 6);
+        statAlerts.forEach((a) => activeAlerts.push(a));
 
         res.json(activeAlerts);
     } catch (error) {
@@ -456,23 +472,18 @@ app.get('/api/correlation/:location', async (req, res) => {
         const location = req.params.location;
         if (!db) return res.json({ sunlightMoistureCorr: 0, tempMoistureCorr: 0 });
 
-        const ref = db.ref('cleaned_sensors');
         const startTime = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-
-        const snapshot = await ref.orderByChild('timestamp').startAt(startTime).once('value');
+        const { rows: merged } = await getMergedSensorRowsForLocation(db, location, 200);
 
         const sunlight = [];
         const moisture = [];
         const temperature = [];
 
-        snapshot.forEach(snap => {
-            const d = snap.val();
-            // Using correct fields based on real Firebase data. Lenient device_id.
-            if (d.device_id === location || !d.device_id) {
-                if (d.light_lux !== undefined) sunlight.push(Number(d.light_lux));
-                if (d.soil_moisture !== undefined) moisture.push(Number(d.soil_moisture));
-                if (d.temperature !== undefined) temperature.push(Number(d.temperature));
-            }
+        merged.forEach((d) => {
+            if (String(d.timestamp || '') < startTime) return;
+            if (d.light_lux !== undefined && Number.isFinite(Number(d.light_lux))) sunlight.push(Number(d.light_lux));
+            if (d.soil_moisture !== undefined && Number.isFinite(Number(d.soil_moisture))) moisture.push(Number(d.soil_moisture));
+            if (d.temperature !== undefined && Number.isFinite(Number(d.temperature))) temperature.push(Number(d.temperature));
         });
 
         const minLength = Math.min(sunlight.length, moisture.length, temperature.length);
@@ -520,27 +531,49 @@ app.get('/api/ml/:location', async (req, res) => {
     }
 });
 
+/**
+ * Statistical anomalies (rolling z-score + MAD) — chart-ready, separate from ML /api/anomaly.
+ */
+app.get('/api/anomalies/:location', async (req, res) => {
+    try {
+        const { location } = req.params;
+        if (!db) {
+            return res.status(503).json({
+                error: 'Database not connected',
+                summary: { totalReadings: 0, anomalyCount: 0, anomalyRate: 0, anomalyRatePercent: 0 },
+            });
+        }
+
+        const limit = Math.min(500, Math.max(30, parseInt(req.query.limit, 10) || 200));
+        const { rows } = await getMergedSensorRowsForLocation(db, location, limit);
+        const payload = buildAnomaliesApiResponse(rows, location, req.query);
+        res.json(payload);
+    } catch (e) {
+        console.error('/api/anomalies error:', e.message);
+        res.status(500).json({ error: e.message });
+    }
+});
+
 // Anomaly detection for the latest multivariate reading at a location.
 app.get('/api/anomaly/:location', async (req, res) => {
     try {
         const { location } = req.params;
         if (!db) return res.json({ is_anomaly: false, anomaly_score: 0, cluster: null });
 
-        const snapshot = await db.ref('cleaned_sensors').limitToLast(50).once('value');
-        let latest = null;
-        snapshot.forEach(snap => {
-            const d = snap.val();
-            if ((d.device_id === location || !d.device_id) && d.soil_moisture !== undefined) {
-                latest = d;
-            }
-        });
-        if (!latest) return res.json({ is_anomaly: false, anomaly_score: 0, cluster: null });
+        const { rows } = await getMergedSensorRowsForLocation(db, location, 120);
+        const withSoil = rows.filter(
+            (d) => d.soil_moisture !== undefined && Number.isFinite(Number(d.soil_moisture))
+        );
+        if (withSoil.length === 0) {
+            return res.json({ is_anomaly: false, anomaly_score: 0, cluster: null });
+        }
+        const latest = withSoil[withSoil.length - 1];
 
         const pyRes = await axios.post('http://localhost:5001/anomaly', {
-            moisture:    Number(latest.soil_moisture ?? 0),
-            temperature: Number(latest.temperature  ?? 25),
-            humidity:    Number(latest.humidity     ?? 55),
-            light_lux:   Number(latest.light_lux    ?? 20000)
+            moisture: Number(latest.soil_moisture ?? 0),
+            temperature: Number(latest.temperature ?? 25),
+            humidity: Number(latest.humidity ?? 55),
+            light_lux: Number(latest.light_lux ?? 20000),
         }, { timeout: 2000 });
         res.json(pyRes.data);
     } catch (e) {

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import axios from 'axios';
 import {
     Chart as ChartJS,
@@ -9,13 +9,12 @@ import {
     Title,
     Tooltip,
     Legend,
-    Filler
+    Filler,
 } from 'chart.js';
 import { Line } from 'react-chartjs-2';
-import StatsCard from './StatsCard';
 import NeedleGaugeChart from './NeedleGaugeChart';
+import './TemporalAnalysisPanel.css';
 
-// Register Chart.js components
 ChartJS.register(
     CategoryScale,
     LinearScale,
@@ -27,102 +26,208 @@ ChartJS.register(
     Filler
 );
 
+function formatStat(v) {
+    if (v === null || v === undefined || Number.isNaN(Number(v))) return '—';
+    return Number(v).toFixed(1);
+}
+
 const TemporalAnalysisPanel = ({ location }) => {
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
 
-    const fetchData = async () => {
-        try {
-            const response = await axios.get(`http://localhost:5000/api/temporal/soil_moisture/${location}`);
-            setData(response.data);
-            setLoading(false);
-        } catch (err) {
-            console.error("Error fetching temporal data:", err);
-            setError("Failed to fetch temporal data. Is the backend running?");
-            setLoading(false);
-        }
-    };
-
-    useEffect(() => {
-        fetchData();
-        const interval = setInterval(fetchData, 5000); // 5 sec auto-update
-        return () => clearInterval(interval);
-    }, [location]);
-
-    if (loading && !data) return <div className="loading pulse">Loading Temporal Analytics...</div>;
-    if (error) return <div className="loading" style={{ color: 'var(--danger)' }}>{error}</div>;
-    if (!data) return null;
-
-    const chartData = {
-        labels: data.rawData.map(d => new Date(d.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })),
-        datasets: [
-            {
-                label: 'Soil Moisture (%)',
-                data: data.rawData.map(d => d.value),
-                fill: true,
-                borderColor: '#10b981', // Emerald green for agriculture
-                backgroundColor: 'rgba(16, 185, 129, 0.2)',
-                tension: 0.4,
-                pointBackgroundColor: '#10b981',
-                pointBorderColor: '#fff',
-                pointHoverRadius: 6,
-            }
-        ]
-    };
-
-    const options = {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-            legend: { display: false },
-            tooltip: {
-                backgroundColor: 'rgba(15, 23, 42, 0.9)',
-                titleFont: { family: 'Outfit', size: 14 },
-                bodyFont: { family: 'Outfit', size: 14 },
-                padding: 12,
-                borderColor: 'rgba(255, 255, 255, 0.1)',
-                borderWidth: 1,
+    const loadTemporal = useCallback(
+        async (showSpinner) => {
+            if (showSpinner) setLoading(true);
+            try {
+                const response = await axios.get(`http://localhost:5000/api/temporal/soil_moisture/${location}`);
+                setData(response.data);
+                setError(null);
+            } catch (err) {
+                console.error('Error fetching temporal data:', err);
+                if (showSpinner) {
+                    setError('Could not load temporal data. Check that the backend is running.');
+                }
+            } finally {
+                if (showSpinner) setLoading(false);
             }
         },
-        scales: {
-            y: {
-                grid: { color: 'rgba(255, 255, 255, 0.05)' },
-                ticks: { color: '#94a3b8', font: { family: 'Outfit' } }
+        [location]
+    );
+
+    useEffect(() => {
+        loadTemporal(true);
+        const interval = setInterval(() => loadTemporal(false), 5000);
+        return () => clearInterval(interval);
+    }, [loadTemporal]);
+
+    const raw = data?.rawData || [];
+    const trend = data?.trend;
+
+    const chartData = useMemo(
+        () => ({
+            labels: raw.map((d) =>
+                new Date(d.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            ),
+            datasets: [
+                {
+                    label: 'Soil moisture (%)',
+                    data: raw.map((d) => d.value),
+                    fill: true,
+                    borderColor: '#34d399',
+                    backgroundColor: 'rgba(52, 211, 153, 0.12)',
+                    borderWidth: 2,
+                    tension: 0.35,
+                    pointBackgroundColor: '#6ee7b7',
+                    pointBorderColor: 'rgba(15, 23, 42, 0.85)',
+                    pointBorderWidth: 2,
+                    pointRadius: raw.length > 60 ? 0 : 3,
+                    pointHoverRadius: 7,
+                },
+            ],
+        }),
+        [raw]
+    );
+
+    const chartOptions = useMemo(
+        () => ({
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    backgroundColor: 'rgba(15, 23, 42, 0.94)',
+                    titleFont: { family: 'Outfit', size: 13, weight: '600' },
+                    bodyFont: { family: 'Outfit', size: 12 },
+                    padding: 12,
+                    cornerRadius: 10,
+                    borderColor: 'rgba(52, 211, 153, 0.22)',
+                    borderWidth: 1,
+                },
             },
-            x: {
-                grid: { display: false },
-                ticks: { color: '#94a3b8', font: { family: 'Outfit' } }
-            }
-        }
-    };
+            scales: {
+                y: {
+                    beginAtZero: false,
+                    grid: { color: 'rgba(255, 255, 255, 0.06)', drawBorder: false },
+                    ticks: { color: 'rgba(148, 163, 184, 0.95)', font: { family: 'Outfit', size: 11 } },
+                    border: { display: false },
+                },
+                x: {
+                    grid: { display: false },
+                    ticks: {
+                        color: 'rgba(148, 163, 184, 0.88)',
+                        font: { family: 'Outfit', size: 10 },
+                        maxRotation: 0,
+                        autoSkip: true,
+                        maxTicksLimit: 14,
+                    },
+                    border: { display: false },
+                },
+            },
+        }),
+        []
+    );
 
-    return (
-        <div className="stats-grid">
-            <StatsCard label="Current" value={data.trend.latest} unit="%" color="#10b981" />
-            <StatsCard label="Average (24h)" value={data.trend.avg} unit="%" color="#38bdf8" />
-            <StatsCard label="Minimum" value={data.trend.min} unit="%" color="#f59e0b" />
-            <StatsCard label="Maximum" value={data.trend.max} unit="%" color="#f43f5e" />
+    const kpis = useMemo(() => {
+        if (!trend) return [];
+        return [
+            { label: 'Current', value: formatStat(trend.latest), unit: '%', accent: '#34d399' },
+            { label: 'Average (24h)', value: formatStat(trend.avg), unit: '%', accent: '#38bdf8' },
+            { label: 'Minimum', value: formatStat(trend.min), unit: '%', accent: '#fbbf24' },
+            { label: 'Maximum', value: formatStat(trend.max), unit: '%', accent: '#fb7185' },
+        ];
+    }, [trend]);
 
-            <div className="card insight-card" style={{ gridColumn: '1 / -1', background: 'rgba(16, 185, 129, 0.1)', borderLeft: '4px solid #10b981' }}>
-                <h3 className="card-title" style={{ color: '#10b981', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span>💡</span> Farmer Insight
-                </h3>
-                <p style={{ fontSize: '1.1rem', marginTop: '10px', lineHeight: '1.5', color: '#e2e8f0' }}>
-                    {data.trend.insight || "Collecting data to provide insights..."}
-                </p>
-            </div>
-
-            <div className="card gauge-card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-                <h3 className="card-title">Current Condition</h3>
-                <div style={{ padding: '2rem 1rem 0 1rem' }}>
-                    <NeedleGaugeChart value={data.trend.latest} size={220} />
+    if (loading && !data) {
+        return (
+            <div className="temp-pro">
+                <div className="temp-pro-state">
+                    <div className="temp-pro-state__spinner" aria-hidden />
+                    <p style={{ margin: 0, fontWeight: 700, color: '#ecfdf5' }}>Loading temporal analytics…</p>
+                    <p style={{ margin: 0, fontSize: '0.875rem', color: 'rgba(167, 243, 208, 0.82)' }}>
+                        Fetching 24-hour soil moisture series
+                    </p>
                 </div>
             </div>
+        );
+    }
 
-            <div className="card chart-container" style={{ gridColumn: 'span 3' }}>
-                <h3 className="card-title">Temporal Trend (24h)</h3>
-                <Line data={chartData} options={options} />
+    if (error) {
+        return (
+            <div className="temp-pro">
+                <div className="temp-pro-state temp-pro-state--error">
+                    <p style={{ margin: 0, fontWeight: 800, color: '#fecaca' }}>Unable to load data</p>
+                    <p style={{ margin: '0.5rem 0 0', color: 'rgba(226, 232, 240, 0.88)', maxWidth: '28rem' }}>{error}</p>
+                    <button type="button" className="temp-pro-retry" onClick={() => loadTemporal(true)}>
+                        Retry
+                    </button>
+                </div>
+            </div>
+        );
+    }
+
+    if (!data || !trend) return null;
+
+    const gaugeSize = 210;
+
+    return (
+        <div className="temp-pro">
+            <header className="temp-pro__hero">
+                <div>
+                    <p className="temp-pro__eyebrow">Time-series intelligence</p>
+                    <h2 className="temp-pro__title">Temporal analysis</h2>
+                    <p className="temp-pro__lead">
+                        Rolling 24-hour soil moisture statistics, a live gauge for the latest reading, and the full
+                        intraday curve—ideal for spotting drift before it becomes a field problem.
+                    </p>
+                </div>
+                <div className="temp-pro__badge">
+                    <span className="temp-pro__badge-dot" aria-hidden />
+                    {location} · 24h · refresh 5s
+                </div>
+            </header>
+
+            <section className="temp-pro__kpis" aria-label="Moisture statistics">
+                {kpis.map((k) => (
+                    <article key={k.label} className="temp-pro-kpi" style={{ ['--temp-kpi-accent']: k.accent }}>
+                        <span className="temp-pro-kpi__label">{k.label}</span>
+                        <div className="temp-pro-kpi__value">
+                            {k.value}
+                            <span>{k.unit}</span>
+                        </div>
+                    </article>
+                ))}
+            </section>
+
+            <section className="temp-pro__insight" aria-labelledby="temp-insight-title">
+                <div className="temp-pro__insight-head">
+                    <span className="temp-pro__insight-icon" aria-hidden>
+                        💡
+                    </span>
+                    <h3 id="temp-insight-title" className="temp-pro__insight-title">
+                        Farmer insight
+                    </h3>
+                </div>
+                <p className="temp-pro__insight-body">
+                    {trend.insight || 'Collecting enough points to summarize trend and confidence.'}
+                </p>
+            </section>
+
+            <div className="temp-pro__viz">
+                <div className="temp-pro-panel temp-pro-panel--gauge">
+                    <h3 className="temp-pro-panel__title">Current condition</h3>
+                    <div className="temp-pro-panel__body">
+                        <NeedleGaugeChart value={Number(trend.latest) || 0} size={gaugeSize} />
+                    </div>
+                </div>
+
+                <div className="temp-pro-panel">
+                    <h3 className="temp-pro-panel__title">Moisture trend · last 24 hours</h3>
+                    <div className="temp-pro-panel__chart">
+                        <Line data={chartData} options={chartOptions} />
+                    </div>
+                </div>
             </div>
         </div>
     );

@@ -1,11 +1,107 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
 import NeedleGaugeChart from './NeedleGaugeChart';
+import './MLPredictionPanel.css';
+
+function IconSpark() {
+    return (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
+            <path
+                d="M12 2l2.2 6.8h7.1l-5.7 4.1 2.2 6.8L12 17.6 6.2 19.7l2.2-6.8L2.7 8.8h7.1L12 2z"
+                stroke="currentColor"
+                strokeWidth="1.25"
+                strokeLinejoin="round"
+                fill="rgba(52, 211, 153, 0.18)"
+            />
+        </svg>
+    );
+}
+
+function IconDroplet() {
+    return (
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>
+            <path
+                d="M12 21a7 7 0 0 0 4-12l-4-6-4 6a7 7 0 0 0 4 12Z"
+                stroke="currentColor"
+                strokeWidth="1.65"
+                strokeLinejoin="round"
+                fill="rgba(56, 189, 248, 0.15)"
+            />
+        </svg>
+    );
+}
+
+/** Map API strings to UI tier so "GREEN" / "Green" use correct colors */
+function getSoilHealthPresentation(soilStatus, severity) {
+    const raw = String(soilStatus || '').trim();
+    const lower = raw.toLowerCase();
+
+    const isGood =
+        severity === 'success' ||
+        severity === 'info' ||
+        /optimal|green|healthy|good|fine|ok|adequate|sufficient/i.test(raw);
+    const isWarn =
+        severity === 'warning' || /moderate|yellow|stress|caution|watch|fair/i.test(raw);
+    const isBad =
+        severity === 'critical' ||
+        severity === 'error' ||
+        /dry|red|critical|poor|severe|low\s*moist|urgent/i.test(raw);
+
+    let tier = 'neutral';
+    if (isGood) tier = 'good';
+    else if (isWarn) tier = 'warn';
+    else if (isBad) tier = 'bad';
+
+    const hints = {
+        good: 'Within comfortable range for most crops',
+        warn: 'Monitor closely and plan irrigation if trend continues',
+        bad: 'Irrigation or soil check may be needed soon',
+        neutral: 'Based on the latest model classification',
+    };
+
+    return {
+        tier,
+        displayStatus: raw || 'Unknown',
+        hint: hints[tier],
+    };
+}
+
+function healthStyleVars(tier) {
+    if (tier === 'good') {
+        return {
+            '--ml-health-bg': 'rgba(16, 185, 129, 0.12)',
+            '--ml-health-border': 'rgba(52, 211, 153, 0.35)',
+            '--ml-health-text': '#d1fae5',
+            '--ml-health-hint': 'rgba(209, 250, 229, 0.78)',
+        };
+    }
+    if (tier === 'warn') {
+        return {
+            '--ml-health-bg': 'rgba(245, 158, 11, 0.1)',
+            '--ml-health-border': 'rgba(251, 191, 36, 0.4)',
+            '--ml-health-text': '#fde68a',
+            '--ml-health-hint': 'rgba(254, 243, 199, 0.85)',
+        };
+    }
+    if (tier === 'bad') {
+        return {
+            '--ml-health-bg': 'rgba(239, 68, 68, 0.1)',
+            '--ml-health-border': 'rgba(248, 113, 113, 0.4)',
+            '--ml-health-text': '#fecaca',
+            '--ml-health-hint': 'rgba(254, 226, 226, 0.82)',
+        };
+    }
+    return {
+        '--ml-health-bg': 'rgba(148, 163, 184, 0.08)',
+        '--ml-health-border': 'rgba(148, 163, 184, 0.25)',
+        '--ml-health-text': '#e2e8f0',
+        '--ml-health-hint': 'rgba(226, 232, 240, 0.7)',
+    };
+}
 
 const MLPredictionPanel = ({ location }) => {
     const [prediction, setPrediction] = useState(null);
     const [loading, setLoading] = useState(true);
-
     const [error, setError] = useState(null);
 
     const fetchPrediction = async () => {
@@ -15,8 +111,8 @@ const MLPredictionPanel = ({ location }) => {
             setLoading(false);
             setError(null);
         } catch (err) {
-            console.error("Error fetching ML prediction:", err);
-            setError("Failed to connect to Machine Learning service. Please ensure the backend and ML service are running.");
+            console.error('Error fetching ML prediction:', err);
+            setError('Could not reach the ML service. Start the Python service on port 5001 and try again.');
             setLoading(false);
         }
     };
@@ -27,96 +123,132 @@ const MLPredictionPanel = ({ location }) => {
         return () => clearInterval(interval);
     }, [location]);
 
-    if (loading && !prediction) {
-        return <div className="card ml-card pulse" style={{ padding: '2rem', textAlign: 'center' }}>Loading AI Predictions...</div>;
-    }
+    const health = useMemo(
+        () => (prediction ? getSoilHealthPresentation(prediction.soilStatus, prediction.severity) : null),
+        [prediction]
+    );
 
-    if (error) {
+    const healthVars = useMemo(() => (health ? healthStyleVars(health.tier) : {}), [health]);
+
+    if (loading && !prediction) {
         return (
-            <div className="card ml-card" style={{ padding: '3rem', textAlign: 'center', borderColor: 'var(--danger)' }}>
-                <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>⚠️</div>
-                <h3 style={{ color: 'var(--danger)', marginBottom: '1rem' }}>ML Service Unavailable</h3>
-                <p style={{ color: 'var(--text-secondary)', marginBottom: '2rem' }}>{error}</p>
-                <button
-                    onClick={fetchPrediction}
-                    style={{ background: 'var(--accent-color)', color: 'white', border: 'none', padding: '0.75rem 1.5rem', borderRadius: '0.5rem', cursor: 'pointer', fontWeight: 600 }}
-                >
-                    Retry Connection
-                </button>
+            <div className="ml-panel">
+                <div className="ml-panel-state">
+                    <div className="ml-panel-state__spinner" aria-hidden />
+                    <p style={{ fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>Running irrigation model…</p>
+                    <p style={{ margin: '0.5rem 0 0', fontSize: '0.9rem', color: 'rgba(167, 243, 208, 0.85)', maxWidth: '28rem' }}>
+                        Fetching moisture forecast and recommendation from the ML service.
+                    </p>
+                </div>
             </div>
         );
     }
 
-    if (!prediction) return null;
+    if (error) {
+        return (
+            <div className="ml-panel">
+                <div className="ml-panel-state ml-panel-state--error">
+                    <p style={{ fontWeight: 800, color: '#fecaca', margin: 0, fontSize: '1.15rem' }}>ML service unavailable</p>
+                    <p style={{ margin: '0.75rem 0 0', color: 'rgba(226, 232, 240, 0.88)', maxWidth: '32rem', lineHeight: 1.55 }}>
+                        {error}
+                    </p>
+                    <button type="button" className="ml-retry" onClick={fetchPrediction}>
+                        Retry connection
+                    </button>
+                </div>
+            </div>
+        );
+    }
 
-    const { soilStatus, recommendation, severity, icon = "🌱" } = prediction;
+    if (!prediction || !health) return null;
+
+    const { recommendation, icon = '🌱' } = prediction;
     const currentMoisture = parseFloat(prediction.currentMoisture) || 0;
     const predictedMoisture = parseFloat(prediction.predictedMoisture) || 0;
 
-    let statusColor = "#ef4444"; // Dry Red (danger)
-    let statusBg = "rgba(239, 68, 68, 0.1)";
-    if (soilStatus === "Optimal Health" || severity === "success" || severity === "info") {
-        statusColor = "#10b981"; // Emerald Green
-        statusBg = "rgba(16, 185, 129, 0.1)";
-    }
-    if (soilStatus === "Moderate Stress" || severity === "warning") {
-        statusColor = "#f59e0b"; // Yellow Warning
-        statusBg = "rgba(245, 158, 11, 0.1)";
-    }
-
-    // Determine gauge color based on predicted dryness
-    const getGaugeColor = (val) => {
-        if (val < 40) return "#ef4444"; // Red for danger/dry
-        if (val < 60) return "#f59e0b"; // Yellow for moderate
-        return "#10b981"; // Green for healthy
-    };
+    const gaugeSize = typeof window !== 'undefined' && window.innerWidth < 600 ? 180 : 210;
 
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem', height: '100%', minHeight: '70vh', gridColumn: 'span 4' }}>
-
-            {/* Top Row: Key Metrics */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '2rem', flex: 1 }}>
-
-                {/* Current Moisture Card */}
-                <div className="card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'var(--card-bg)', padding: '3rem 2rem', border: '1px solid var(--glass-border)' }}>
-                    <p style={{ color: 'var(--text-secondary)', fontSize: '1.2rem', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '1.5rem' }}>Current Moisture</p>
-                    <div style={{ padding: '2rem 1rem 0 1rem' }}>
-                        <NeedleGaugeChart value={currentMoisture} size={220} />
-                    </div>
-                </div>
-
-                {/* Soil Health Card */}
-                <div className="card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'var(--card-bg)', padding: '3rem 2rem', border: '1px solid var(--glass-border)' }}>
-                    <p style={{ color: 'var(--text-secondary)', fontSize: '1.2rem', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '2rem' }}>Soil Health</p>
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem', background: statusBg, border: `2px solid ${statusColor}`, color: statusColor, padding: '1.5rem', borderRadius: '24px', fontWeight: 700, fontSize: '1.5rem', boxShadow: `0 0 30px ${statusBg}`, textAlign: 'center', width: '100%' }}>
-                        <span style={{ fontSize: '3rem', lineHeight: 1 }}>{icon}</span>
-                        <span>{soilStatus}</span>
-                    </div>
-                </div>
-
-                {/* Prediction Gauge Card */}
-                <div className="card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'var(--card-bg)', padding: '3rem 2rem', border: '1px solid var(--glass-border)', overflow: 'hidden' }}>
-                    <p style={{ color: 'var(--text-secondary)', fontSize: '1.2rem', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '3rem', textAlign: 'center' }}>Prediction (Next 3h)</p>
-
-                    <div style={{ padding: '2rem 1rem 0 1rem' }}>
-                        <NeedleGaugeChart value={predictedMoisture} size={220} />
-                    </div>
-                </div>
-
-            </div>
-
-            {/* Bottom Row: Recommendation Banner */}
-            <div className="card" style={{ background: 'rgba(52, 211, 153, 0.1)', border: '1px solid rgba(52, 211, 153, 0.3)', borderLeft: '8px solid #34d399', padding: '3rem 4rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div className="ml-panel">
+            <header className="ml-panel__hero">
                 <div>
-                    <h4 style={{ color: '#34d399', fontSize: '1.1rem', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '1rem' }}>Automated AI Action Plan</h4>
-                    <div style={{ fontSize: '2.5rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.5rem' }}>💧 {recommendation}</div>
+                    <p className="ml-panel__eyebrow">Machine learning</p>
+                    <h2 className="ml-panel__title">
+                        <span className="ml-panel__title-icon" aria-hidden>
+                            <IconSpark />
+                        </span>
+                        Smart irrigation recommendations
+                    </h2>
+                    <p className="ml-panel__subtitle">
+                        Live moisture readout, soil health label from the classifier, and a short-horizon moisture
+                        forecast—combined into a single action-oriented summary.
+                    </p>
                 </div>
-                <div style={{ background: 'rgba(255,255,255,0.05)', padding: '2rem', borderRadius: '1rem', border: '1px solid rgba(255,255,255,0.1)', textAlign: 'right' }}>
-                    <div style={{ fontSize: '1.1rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Best Irrigation Window</div>
-                    <div style={{ fontSize: '1.6rem', color: 'var(--accent-color)', fontWeight: 600 }}>6:00 AM – 8:00 AM or Evening</div>
+                <div className="ml-panel__badge">
+                    <span className="ml-panel__badge-dot" aria-hidden />
+                    {location} · refresh 5s
                 </div>
+            </header>
+
+            <div className="ml-panel__metrics">
+                <article
+                    className="ml-metric-card"
+                    style={{ '--ml-card-accent': 'linear-gradient(90deg, #34d399, #6ee7b7)' }}
+                >
+                    <p className="ml-metric-card__label">Current moisture</p>
+                    <div className="ml-metric-card__body">
+                        <div className="ml-metric-card__gauge-wrap">
+                            <NeedleGaugeChart value={currentMoisture} size={gaugeSize} />
+                        </div>
+                    </div>
+                </article>
+
+                <article
+                    className="ml-metric-card"
+                    style={{ '--ml-card-accent': 'linear-gradient(90deg, #a78bfa, #818cf8)' }}
+                >
+                    <p className="ml-metric-card__label">Soil health</p>
+                    <div className="ml-metric-card__body">
+                        <div className="ml-health" style={healthVars}>
+                            <div className="ml-health__icon" aria-hidden>
+                                {icon}
+                            </div>
+                            <p className="ml-health__status">{health.displayStatus}</p>
+                            <p className="ml-health__hint">{health.hint}</p>
+                        </div>
+                    </div>
+                </article>
+
+                <article
+                    className="ml-metric-card"
+                    style={{ '--ml-card-accent': 'linear-gradient(90deg, #38bdf8, #22d3ee)' }}
+                >
+                    <p className="ml-metric-card__label">Prediction · next 3h</p>
+                    <div className="ml-metric-card__body">
+                        <div className="ml-metric-card__gauge-wrap">
+                            <NeedleGaugeChart value={predictedMoisture} size={gaugeSize} />
+                        </div>
+                    </div>
+                </article>
             </div>
 
+            <section className="ml-action" aria-labelledby="ml-action-heading">
+                <div>
+                    <p id="ml-action-heading" className="ml-action__eyebrow">
+                        Automated AI action plan
+                    </p>
+                    <div className="ml-action__row">
+                        <div className="ml-action__icon" aria-hidden>
+                            <IconDroplet />
+                        </div>
+                        <p className="ml-action__text">{recommendation}</p>
+                    </div>
+                </div>
+                <aside className="ml-action__aside">
+                    <p className="ml-action__aside-label">Best irrigation window</p>
+                    <p className="ml-action__aside-value">6:00 AM – 8:00 AM or evening</p>
+                </aside>
+            </section>
         </div>
     );
 };

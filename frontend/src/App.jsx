@@ -7,7 +7,25 @@ import MLPredictionPanel from './components/MLPredictionPanel';
 import Login from './components/Login';
 import Register from './components/Register';
 import DashboardHome from './components/DashboardHome';
+import AnomalyDetectionPanel from './components/AnomalyDetectionPanel';
 import ChatBot from './components/ChatBot';
+
+function toTitleCase(name) {
+  if (!name || typeof name !== 'string') return 'Farm operator';
+  return name
+    .trim()
+    .split(/\s+/)
+    .map((w) => (w ? w.charAt(0).toUpperCase() + w.slice(1).toLowerCase() : ''))
+    .join(' ');
+}
+
+function getInitials(name) {
+  if (!name || typeof name !== 'string') return 'AG';
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return 'AG';
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase();
+}
 
 function App() {
   const [user, setUser] = useState(null);
@@ -57,7 +75,7 @@ function App() {
       case 'alerts':
         return (
           <div className="tab-layout-grid alerts-full">
-            <AlertsPanel />
+            <AlertsPanel location={location} />
           </div>
         );
       case 'correlation':
@@ -70,6 +88,12 @@ function App() {
         return (
           <div className="tab-layout-grid full-width-card">
             <MLPredictionPanel location={location} />
+          </div>
+        );
+      case 'anomalies':
+        return (
+          <div className="tab-layout-grid full-width-card">
+            <AnomalyDetectionPanel location={location} />
           </div>
         );
       default:
@@ -88,15 +112,19 @@ function App() {
               {activeTab === 'temporal' && 'Temporal Analysis'}
               {activeTab === 'alerts' && 'Threshold Alerts'}
               {activeTab === 'correlation' && 'Correlation Discovery'}
-              {activeTab === 'ml' && '🤖 Smart Irrigation Recommendations'}
+              {activeTab === 'ml' && 'Intelligent irrigation'}
+              {activeTab === 'anomalies' && 'Statistical anomalies'}
             </h1>
           </div>
-          <div className="user-profile-badge">
-            <div className="user-info">
-              <span className="user-name">{user.fullName || 'Farmer'}</span>
-              <span className="farm-name">{user.farmName || 'Great Farm'}</span>
+          <div className="header-profile" role="group" aria-label="Signed-in account">
+            <div className="header-profile__avatar" aria-hidden title={user.fullName || 'User'}>
+              {getInitials(user.fullName)}
             </div>
-            <div className="user-avatar">👨‍🌾</div>
+            <div className="header-profile__body">
+              <span className="header-profile__name">{toTitleCase(user.fullName)}</span>
+              <span className="header-profile__farm">{user.farmName || 'Primary operation'}</span>
+            </div>
+            <span className="header-profile__status" title="Session active" aria-label="Session active" />
           </div>
         </header>
         <div className="tab-content">

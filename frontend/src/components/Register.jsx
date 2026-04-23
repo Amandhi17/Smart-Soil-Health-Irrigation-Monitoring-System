@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import axios from 'axios';
+import AuthBrandMark from './AuthBrandMark';
 
 const Register = ({ onSwitchToLogin }) => {
     const [fullName, setFullName] = useState('');
@@ -38,81 +39,102 @@ const Register = ({ onSwitchToLogin }) => {
 
     return (
         <div className="auth-container">
-            <div className="auth-card glass-panel" style={{ maxWidth: '550px' }}>
+            <div className="auth-backdrop" aria-hidden />
+            <div className="auth-card auth-card--wide">
                 <div className="auth-header">
-                    <div className="auth-logo">🚜</div>
+                    <AuthBrandMark />
+                    <p className="auth-eyebrow">Create your workspace</p>
                     <h2>Join AgriSmart</h2>
-                    <p>Start your journey toward data-driven farming</p>
+                    <p className="auth-subtitle">Set up your profile and start monitoring soil health in minutes</p>
                 </div>
 
                 <form className="auth-form" onSubmit={handleRegister}>
                     <div className="auth-form-grid">
                         <div className="input-group">
-                            <label>Farmer Name</label>
+                            <label htmlFor="register-fullName">Farmer Name</label>
                             <input
+                                id="register-fullName"
                                 type="text"
                                 placeholder="John Doe"
                                 value={fullName}
                                 onChange={(e) => setFullName(e.target.value)}
+                                autoComplete="name"
                                 required
                             />
                         </div>
                         <div className="input-group">
-                            <label>Farm Name</label>
+                            <label htmlFor="register-farmName">Farm Name</label>
                             <input
+                                id="register-farmName"
                                 type="text"
                                 placeholder="Green Valley"
                                 value={farmName}
                                 onChange={(e) => setFarmName(e.target.value)}
+                                autoComplete="organization"
                                 required
                             />
                         </div>
                     </div>
 
                     <div className="input-group">
-                        <label>Email Address</label>
+                        <label htmlFor="register-email">Email Address</label>
                         <input
+                            id="register-email"
                             type="email"
                             placeholder="your@email.com"
                             value={email}
                             onChange={(e) => setEmail(e.target.value)}
+                            autoComplete="email"
                             required
                         />
                     </div>
 
                     <div className="auth-form-grid">
                         <div className="input-group">
-                            <label>Password</label>
+                            <label htmlFor="register-password">Password</label>
                             <input
+                                id="register-password"
                                 type="password"
                                 placeholder="••••••••"
                                 value={password}
                                 onChange={(e) => setPassword(e.target.value)}
+                                autoComplete="new-password"
                                 required
                             />
                         </div>
 
                         <div className="input-group">
-                            <label>Confirm</label>
+                            <label htmlFor="register-confirmPassword">Confirm</label>
                             <input
+                                id="register-confirmPassword"
                                 type="password"
                                 placeholder="••••••••"
                                 value={confirmPassword}
                                 onChange={(e) => setConfirmPassword(e.target.value)}
+                                autoComplete="new-password"
                                 required
                             />
                         </div>
                     </div>
 
-                    {error && <div className="auth-error">{error}</div>}
+                    {error && (
+                        <div className="auth-error" role="alert">
+                            {error}
+                        </div>
+                    )}
 
                     <button type="submit" className="auth-button" disabled={loading}>
-                        {loading ? 'Creating Account...' : 'Register as Farmer'}
+                        {loading ? 'Creating account…' : 'Create account'}
                     </button>
                 </form>
 
                 <div className="auth-footer">
-                    <p>Already a member? <span onClick={onSwitchToLogin}>Login Now</span></p>
+                    <p>
+                        Already have an account?{' '}
+                        <button type="button" className="auth-text-link" onClick={onSwitchToLogin}>
+                            Sign in
+                        </button>
+                    </p>
                 </div>
             </div>
         </div>

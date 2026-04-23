@@ -1,0 +1,289 @@
+/* Temporal Analysis — professional layout */
+
+.temp-pro {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  max-width: 1400px;
+  margin: 0 auto;
+  padding-bottom: 1rem;
+}
+
+.temp-pro__hero {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem 1.5rem;
+  padding-bottom: 1.2rem;
+  border-bottom: 1px solid rgba(52, 211, 153, 0.12);
+}
+
+.temp-pro__eyebrow {
+  margin: 0 0 0.35rem;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: rgba(110, 231, 183, 0.45);
+}
+
+.temp-pro__title {
+  margin: 0 0 0.4rem;
+  font-size: clamp(1.35rem, 2.2vw, 1.75rem);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  color: #f8fafc;
+}
+
+.temp-pro__lead {
+  margin: 0;
+  max-width: 40rem;
+  font-size: 0.92rem;
+  line-height: 1.55;
+  color: rgba(167, 243, 208, 0.88);
+}
+
+.temp-pro__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.85rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: rgba(226, 232, 240, 0.9);
+  background: rgba(4, 32, 28, 0.65);
+  border: 1px solid rgba(52, 211, 153, 0.2);
+}
+
+.temp-pro__badge-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #34d399;
+  box-shadow: 0 0 10px rgba(52, 211, 153, 0.65);
+}
+
+.temp-pro__kpis {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1rem;
+}
+
+@media (max-width: 900px) {
+  .temp-pro__kpis {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 480px) {
+  .temp-pro__kpis {
+    grid-template-columns: 1fr;
+  }
+}
+
+.temp-pro-kpi {
+  position: relative;
+  padding: 1.1rem 1.15rem;
+  border-radius: 1rem;
+  text-align: left;
+  background: linear-gradient(165deg, rgba(8, 58, 50, 0.55) 0%, rgba(4, 28, 26, 0.85) 100%);
+  border: 1px solid rgba(52, 211, 153, 0.14);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset;
+  overflow: hidden;
+}
+
+.temp-pro-kpi::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  border-radius: 3px 0 0 3px;
+  background: var(--temp-kpi-accent, #34d399);
+}
+
+.temp-pro-kpi__label {
+  display: block;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(148, 189, 172, 0.88);
+  margin-bottom: 0.45rem;
+  padding-left: 0.35rem;
+}
+
+.temp-pro-kpi__value {
+  font-size: clamp(1.45rem, 2.5vw, 1.8rem);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  color: #f8fafc;
+  padding-left: 0.35rem;
+}
+
+.temp-pro-kpi__value span {
+  font-size: 0.9rem;
+  font-weight: 600;
+  margin-left: 0.15rem;
+  color: rgba(148, 163, 184, 0.95);
+}
+
+.temp-pro__insight {
+  border-radius: 1.1rem;
+  padding: 1.2rem 1.35rem;
+  background: linear-gradient(105deg, rgba(52, 211, 153, 0.1) 0%, rgba(4, 36, 32, 0.55) 45%, rgba(4, 26, 24, 0.75) 100%);
+  border: 1px solid rgba(52, 211, 153, 0.2);
+  border-left: 4px solid #34d399;
+  box-shadow: 0 14px 40px -22px rgba(0, 0, 0, 0.4);
+}
+
+.temp-pro__insight-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.65rem;
+}
+
+.temp-pro__insight-icon {
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(52, 211, 153, 0.15);
+  border: 1px solid rgba(52, 211, 153, 0.25);
+  font-size: 1.1rem;
+}
+
+.temp-pro__insight-title {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #6ee7b7;
+}
+
+.temp-pro__insight-body {
+  margin: 0;
+  font-size: 1.02rem;
+  line-height: 1.55;
+  color: #e2e8f0;
+  max-width: 100%;
+}
+
+.temp-pro__viz {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(0, 2.2fr);
+  gap: 1.25rem;
+  align-items: stretch;
+}
+
+@media (max-width: 960px) {
+  .temp-pro__viz {
+    grid-template-columns: 1fr;
+  }
+}
+
+.temp-pro-panel {
+  border-radius: 1.15rem;
+  padding: 1.25rem 1.35rem;
+  background: linear-gradient(165deg, rgba(6, 50, 44, 0.72) 0%, rgba(4, 26, 24, 0.9) 100%);
+  border: 1px solid rgba(52, 211, 153, 0.14);
+  box-shadow: 0 18px 48px -26px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  min-height: 320px;
+  min-width: 0;
+}
+
+.temp-pro-panel__title {
+  margin: 0 0 0.75rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(148, 189, 172, 0.85);
+}
+
+.temp-pro-panel__chart {
+  flex: 1;
+  min-height: 300px;
+  position: relative;
+}
+
+.temp-pro-panel--gauge .temp-pro-panel__body {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem 0 0.25rem;
+}
+
+.temp-pro-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 280px;
+  gap: 0.75rem;
+  padding: 2rem;
+  border-radius: 1.15rem;
+  background: rgba(6, 46, 42, 0.45);
+  border: 1px solid rgba(52, 211, 153, 0.14);
+  text-align: center;
+}
+
+.temp-pro-state--error {
+  border-color: rgba(239, 68, 68, 0.35);
+}
+
+.temp-pro-state__spinner {
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 50%;
+  border: 3px solid rgba(52, 211, 153, 0.2);
+  border-top-color: #34d399;
+  animation: temp-pro-spin 0.8s linear infinite;
+}
+
+@keyframes temp-pro-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .temp-pro-state__spinner {
+    animation: none;
+  }
+}
+
+.temp-pro-retry {
+  margin-top: 1rem;
+  padding: 0.65rem 1.35rem;
+  border-radius: 10px;
+  border: none;
+  font-family: inherit;
+  font-size: 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+  background: linear-gradient(135deg, #34d399, #059669);
+  color: #042f2e;
+  box-shadow: 0 4px 16px rgba(52, 211, 153, 0.35);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.temp-pro-retry:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 22px rgba(52, 211, 153, 0.4);
+}
+
+.temp-pro-retry:focus-visible {
+  outline: 2px solid #6ee7b7;
+  outline-offset: 3px;
+}
