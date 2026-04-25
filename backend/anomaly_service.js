@@ -11,12 +11,39 @@
 
 const SENSOR_KEYS = ['soil_moisture', 'temperature', 'humidity', 'light_lux'];
 
+const SENSOR_LABELS = {
+    soil_moisture: 'Soil moisture',
+    temperature: 'Temperature',
+    humidity: 'Humidity',
+    light_lux: 'Light',
+};
+
+const SENSOR_UNITS = {
+    soil_moisture: '%',
+    temperature: '°C',
+    humidity: '%',
+    light_lux: ' lux',
+};
+
 const DEFAULTS = {
     windowSize: 36,
     minHistory: 10,
     zThreshold: 3.0,
     madThreshold: 3.5,
 };
+
+function describeMagnitude(absScore) {
+    if (absScore >= 6) return 'far';
+    if (absScore >= 4.5) return 'much';
+    return 'noticeably';
+}
+
+function formatReading(key, value) {
+    if (!Number.isFinite(value)) return '';
+    const unit = SENSOR_UNITS[key] || '';
+    const decimals = key === 'light_lux' ? 0 : 1;
+    return `${value.toFixed(decimals)}${unit}`;
+}
 
 function median(sortedOrArr) {
     const arr = Array.isArray(sortedOrArr) ? [...sortedOrArr].sort((a, b) => a - b) : [];
@@ -91,7 +118,7 @@ function scoreSeries(rows, opts = {}) {
                 madScores: {},
                 isAnomaly: false,
                 score: 0,
-                reason: `Baseline building: need ${minHistory} prior readings (have ${history.length}).`,
+                reason: `Still learning what is normal for this field (${history.length} of ${minHistory} readings collected).`,
             });
             continue;
         }
@@ -124,10 +151,15 @@ function scoreSeries(rows, opts = {}) {
 
             if (flags[key]) {
                 maxAbs = Math.max(maxAbs, Math.abs(z), Math.abs(rz));
-                const bits = [];
-                if (zFlag) bits.push(`z=${z.toFixed(2)} (threshold ±${zThreshold})`);
-                if (madFlag) bits.push(`MAD-z=${rz.toFixed(2)} (threshold ±${madThresh})`);
-                reasons.push(`${key}: ${bits.join('; ')}`);
+                const label = SENSOR_LABELS[key] || key;
+                const direction = (zFlag ? z : rz) >= 0 ? 'higher' : 'lower';
+                const magnitude = describeMagnitude(Math.max(Math.abs(z), Math.abs(rz)));
+                const reading = formatReading(key, x);
+                const baselineCenter = madFlag ? median(histVals) : m;
+                const baseline = formatReading(key, baselineCenter);
+                reasons.push(
+                    `${label} is ${magnitude} ${direction} than usual (now ${reading}, normally around ${baseline})`
+                );
             }
         }
 
@@ -142,7 +174,7 @@ function scoreSeries(rows, opts = {}) {
             madScores,
             isAnomaly,
             score: Number(maxAbs.toFixed(3)),
-            reason: isAnomaly ? reasons.join(' | ') : 'Within rolling statistical envelope.',
+            reason: isAnomaly ? reasons.join('. ') + '.' : 'Reading looks normal for this field.',
         });
     }
 
